@@ -97,7 +97,7 @@ class CircuitSimulator:
         phase_response = np.angle(total_matrix[0, 0])
         
         # 簡化保真度計算（與理想設計比較）
-        ideal_matrix = self._get_ideal_matrix()
+        ideal_matrix = self._get_ideal_matrix(total_matrix.shape[0]) # 傳入模式數
         fidelity = self._calculate_matrix_fidelity(total_matrix, ideal_matrix)
         
         # 評估製程容忍度 (現在將基於多次擾動模擬)
@@ -188,15 +188,31 @@ class CircuitSimulator:
         params.wavelength = original_wavelength  # 恢復原始波長
         return np.array(response)
     
-    def _get_ideal_matrix(self) -> np.ndarray:
-        """獲取理想傳輸矩陣"""
-        # 對於50/50分束器的理想矩陣
-        return np.array([[1/np.sqrt(2), 1j/np.sqrt(2)],
-                        [1j/np.sqrt(2), 1/np.sqrt(2)]])
+    def _get_ideal_matrix(self, n_modes: int) -> np.ndarray:
+        """
+        獲取理想傳輸矩陣，根據模式數量動態生成。
+        對於2模式，返回50/50分束器矩陣。
+        對於3模式，返回一個簡化的理想玻色採樣矩陣。
+        """
+        if n_modes == 2:
+            # 對於50/50分束器的理想矩陣
+            return np.array([[1/np.sqrt(2), 1j/np.sqrt(2)],
+                            [1j/np.sqrt(2), 1/np.sqrt(2)]])
+        elif n_modes == 3:
+            # 對於3模式玻色採樣的簡化理想矩陣 (例如一個Haar隨機酉矩陣)
+            # 這裡使用 case_b_interference.py 中定義的理想矩陣
+            return np.array([
+                [1/np.sqrt(3), 1/np.sqrt(3), 1/np.sqrt(3)],
+                [1/np.sqrt(3), 1/np.sqrt(3) * np.exp(1j*2*np.pi/3), 1/np.sqrt(3) * np.exp(1j*4*np.pi/3)],
+                [1/np.sqrt(3), 1/np.sqrt(3) * np.exp(1j*4*np.pi/3), 1/np.sqrt(3) * np.exp(1j*2*np.pi/3)]
+            ])
+        else:
+            raise ValueError(f"Unsupported number of modes for ideal matrix: {n_modes}")
     
     def _calculate_matrix_fidelity(self, actual: np.ndarray, ideal: np.ndarray) -> float:
         """計算矩陣保真度"""
         if actual.shape != ideal.shape:
+            # 如果形狀不匹配，直接返回0.0，表示完全不匹配
             return 0.0
         
         # 使用矩陣的Frobenius內積計算相似度
@@ -219,6 +235,9 @@ class CircuitSimulator:
         original_gap = nominal_params.gap
         original_waveguide_width = nominal_params.waveguide_width
 
+        # 獲取元件的模式數量 (假設所有元件模式數相同)
+        n_modes = self.components[0].compute_transmission_matrix(nominal_params).shape[0]
+
         for _ in range(num_samples):
             # 產生擾動參數
             perturbed_params = DesignParameters(
@@ -229,11 +248,7 @@ class CircuitSimulator:
             )
             
             # 模擬擾動後的性能
-            # 這裡需要一個方法來執行單次模擬並返回關鍵指標
-            # 為了避免遞迴，我們直接複製simulate_classical的核心邏輯
-            
-            # 計算總傳輸矩陣
-            total_matrix = np.eye(2, dtype=complex)
+            total_matrix = np.eye(n_modes, dtype=complex) # 使用正確的模式數初始化矩陣
             for component in self.components:
                 T = component.compute_transmission_matrix(perturbed_params)
                 if T.shape[0] == total_matrix.shape[1]:
@@ -246,8 +261,8 @@ class CircuitSimulator:
             total_power = sum(power_outputs)
             loss_db = -10 * np.log10(total_power) if total_power > 0 else float('inf')
             
-            # 計算保真度
-            ideal_matrix = self._get_ideal_matrix()
+            # 計算保真度 (使用動態的理想矩陣)
+            ideal_matrix = self._get_ideal_matrix(n_modes) # 傳入模式數
             fidelity = self._calculate_matrix_fidelity(total_matrix, ideal_matrix)
             
             perturbed_fidelities.append(fidelity)
@@ -258,15 +273,11 @@ class CircuitSimulator:
         nominal_params.gap = original_gap
         nominal_params.waveguide_width = original_waveguide_width
 
-        # 評估穩健性：基於性能指標的標準差或範圍
-        # 這裡我們使用保真度的平均值和標準差來計算穩健性分數
+        # 評估穩健性：高平均保真度，低保真度標準差
         avg_fidelity = np.mean(perturbed_fidelities)
         std_fidelity = np.std(perturbed_fidelities)
         
-        # 穩健性分數：高平均保真度，低保真度標準差
-        # 這裡的公式可以根據實際需求調整，目標是高分代表高穩健性
-        # 例如：avg_fidelity - 2 * std_fidelity (減去兩倍標準差，代表95%的結果會在這個範圍內)
-        # 並將結果限制在0到1之間
+        # 穩健性分數：例如 avg_fidelity - 2 * std_fidelity，並限制在0到1之間
         robustness_score = np.clip(avg_fidelity - 2 * std_fidelity, 0.0, 1.0)
         
         return float(robustness_score)

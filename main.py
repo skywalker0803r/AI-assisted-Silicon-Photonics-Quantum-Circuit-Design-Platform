@@ -105,6 +105,20 @@ def run_quick_demo():
         print(f"❌ 快速演示失敗: {e}")
         return False
 
+def run_case_c():
+    """執行案例C：量子模擬演示"""
+    print("\n" + "="*60)
+    print("執行案例C：量子模擬演示")
+    print("="*60)
+    
+    try:
+        from quantum_demo import main as quantum_demo_main
+        quantum_demo_main()
+        return True
+    except Exception as e:
+        print(f"❌ 案例C執行失敗: {e}")
+        return False
+
 def run_benchmark():
     """執行性能基準測試"""
     print("\n" + "="*60)
@@ -206,6 +220,7 @@ def main():
   python main.py --demo          # 執行快速演示
   python main.py --case-a        # 執行案例A
   python main.py --case-b        # 執行案例B
+  python main.py --case-c        # 執行案例C：量子模擬演示
   python main.py --benchmark     # 執行性能測試
   python main.py --all           # 執行所有案例
         """
@@ -217,6 +232,8 @@ def main():
                        help='執行案例A：50/50分束器設計')
     parser.add_argument('--case-b', action='store_true', 
                        help='執行案例B：三輸入干涉電路設計')
+    parser.add_argument('--case-c', action='store_true', 
+                       help='執行案例C：量子模擬演示')
     parser.add_argument('--benchmark', action='store_true', 
                        help='執行性能基準測試')
     parser.add_argument('--all', action='store_true', 
@@ -258,6 +275,11 @@ def main():
         total_count += 1
         if run_case_b():
             success_count += 1
+
+    if args.case_c or args.all:
+        total_count += 1
+        if run_case_c():
+            success_count += 1
     
     if args.benchmark or args.all:
         total_count += 1
@@ -265,7 +287,7 @@ def main():
             success_count += 1
     
     # 如果沒有指定任何參數，執行快速演示
-    if not any([args.demo, args.case_a, args.case_b, args.benchmark, args.all, args.info]):
+    if not any([args.demo, args.case_a, args.case_b, args.case_c, args.benchmark, args.all, args.info]):
         total_count += 1
         if run_quick_demo():
             success_count += 1

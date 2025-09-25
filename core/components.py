@@ -37,12 +37,16 @@ class DirectionalCoupler(SiliconPhotonicComponent):
         
     def compute_coupling_coefficient(self, params: DesignParameters) -> float:
         """
-        計算耦合係數，基於耦合模理論
-        κ = π/(2*L_c) where L_c is coupling length for 50/50 split
+        計算耦合係數 (每單位長度)，基於簡化模型。
+        kappa 應主要與間距和波導寬度相關，而不是耦合長度本身。
         """
-        # 簡化模型：耦合係數與間距和耦合長度相關
+        # 簡化模型：耦合係數隨間距指數衰減
+        # 這裡的 np.pi / 20.0 是一個基底耦合強度，可以調整以匹配物理模型
         gap_factor = np.exp(-2 * params.gap / 0.2)  # 指數衰減隨間距
-        return np.pi / (2 * params.coupling_length) * gap_factor
+        # 可以根據 waveguide_width 增加額外因子，目前簡化為1
+        width_factor = 1.0 
+        
+        return (np.pi / 20.0) * gap_factor * width_factor
     
     def compute_transmission_matrix(self, params: DesignParameters) -> np.ndarray:
         """

@@ -76,8 +76,8 @@ class SplitterDesignOptimizer:
         # 定義設計空間
         bounds = {
             'coupling_length': (5.0, 50.0),    # 耦合長度 (μm)
-            'gap': (0.1, 1.0),                 # 間距 (μm)  
-            'waveguide_width': (0.3, 0.7)      # 波導寬度 (μm)
+            'gap': (0.05, 1.0),                 # 間距 (μm)
+            'waveguide_width': (0.25, 0.7)      # 波導寬度 (μm)
         }
         
         start_time = time.time()
@@ -282,7 +282,7 @@ def main():
     
     # 執行貝葉斯最佳化
     print("\n1. 執行貝葉斯最佳化...")
-    result_bo = optimizer.run_optimization(n_iterations=40, method='bayesian')
+    result_bo = optimizer.run_optimization(n_iterations=100, method='bayesian')
     optimizer.analyze_results()
     
     # 繪製結果
@@ -295,7 +295,7 @@ def main():
     # 測試代理模型方法
     print("\n4. 測試代理模型方法...")
     optimizer_surrogate = SplitterDesignOptimizer()
-    result_surrogate = optimizer_surrogate.run_optimization(n_iterations=40, method='surrogate')
+    result_surrogate = optimizer_surrogate.run_optimization(n_iterations=100, method='surrogate')
     
     # 比較結果
     print(f"\n=== 方法比較 ===")

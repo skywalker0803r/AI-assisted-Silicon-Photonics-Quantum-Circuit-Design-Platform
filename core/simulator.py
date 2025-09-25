@@ -8,6 +8,7 @@ HAS_QUTIP = True
 from typing import Dict, List, Tuple, Optional, Union
 from dataclasses import dataclass
 import matplotlib.pyplot as plt
+import random # Add this import for random number generation
 
 from .components import SiliconPhotonicComponent, DesignParameters
 
@@ -41,26 +42,7 @@ class QuantumStateSimulator:
             states.append(qt.fock(self.fock_dim, n))
         return qt.tensor(states)
     
-    def apply_beamsplitter(self, state, theta: float, phi: float = 0):
-        """應用分束器操作 - 使用QuTiP的完整實現"""
-        if self.n_modes != 2:
-            raise NotImplementedError("目前僅支援2模式分束器")
-        
-        # 創建湮滅算符
-        a1 = qt.tensor(qt.destroy(self.fock_dim), qt.qeye(self.fock_dim))
-        a2 = qt.tensor(qt.qeye(self.fock_dim), qt.destroy(self.fock_dim))
-        
-        # 分束器變換的酉算符
-        cos_theta = np.cos(theta)
-        sin_theta = np.sin(theta)
-        exp_phi = np.exp(1j * phi)
-        
-        # 使用位移算符實現分束器變換
-        # 這是精確的量子光學實現
-        H_bs = 1j * theta * (a1.dag() * a2 * exp_phi - a1 * a2.dag() * np.conj(exp_phi))
-        U_bs = H_bs.expm()
-        
-        return U_bs * state
+
     
     def calculate_fidelity(self, state1, state2) -> float:
         """計算態保真度"""
@@ -118,12 +100,9 @@ class CircuitSimulator:
         ideal_matrix = self._get_ideal_matrix()
         fidelity = self._calculate_matrix_fidelity(total_matrix, ideal_matrix)
         
-        # 粗略的製程容忍度評估
-        try:
-            robustness_score = self._assess_robustness(params)
-        except RecursionError:
-            # 防止遞迴錯誤，使用簡化計算
-            robustness_score = 0.8
+        # 評估製程容忍度 (現在將基於多次擾動模擬)
+        # 這裡我們將傳入原始的params，並在_assess_robustness內部進行擾動
+        robustness_score = self._assess_robustness(params)
         
         return SimulationResult(
             transmission_efficiency=transmission_eff,
@@ -152,12 +131,22 @@ class CircuitSimulator:
             if T.shape[0] == total_matrix.shape[1]:
                 total_matrix = T @ total_matrix
         
-        # 計算分束器角度
-        theta = np.arccos(abs(total_matrix[0, 0]))
-        phi = np.angle(total_matrix[0, 1]) - np.angle(total_matrix[0, 0])
+        # 假設 input_state 是單光子態，例如 |1,0> (1 photon in mode 1, 0 in mode 2)
+        # 根據 total_matrix 的元素直接構建輸出疊加態
+        fock_dim = self.quantum_sim.fock_dim
         
-        # 應用量子分束器變換
-        output_state = self.quantum_sim.apply_beamsplitter(input_state, theta, phi)
+        # 定義單光子雙模式的基態
+        state_10 = qt.tensor(qt.fock(fock_dim, 1), qt.fock(fock_dim, 0))
+        state_01 = qt.tensor(qt.fock(fock_dim, 0), qt.fock(fock_dim, 1))
+        
+        # 假設輸入態是 |1,0> (即 input_state == state_10)
+        # 輸出態將是 total_matrix[0,0] * |1,0> + total_matrix[1,0] * |0,1>
+        # 這裡 total_matrix[0,0] 是從模式1到模式1的振幅
+        # total_matrix[1,0] 是從模式1到模式2的振幅
+        output_state = total_matrix[0, 0] * state_10 + total_matrix[1, 0] * state_01
+        
+        # 確保輸出態經過歸一化
+        output_state = output_state.unit()
         
         # 計算輸出光子數期望值
         a1 = qt.tensor(qt.destroy(self.quantum_sim.fock_dim), qt.qeye(self.quantum_sim.fock_dim))
@@ -166,10 +155,9 @@ class CircuitSimulator:
         n1_expect = qt.expect(a1.dag() * a1, output_state)
         n2_expect = qt.expect(a2.dag() * a2, output_state)
         
-        # 理想50/50分束器的輸出態
-        ideal_state = self.quantum_sim.create_fock_state([0, 1])  # 理想情況下的輸出
+        # 理想50/50分束器的輸出態 (考慮到 DirectionalCoupler 引入的 pi/2 相位)
         ideal_superposition = (self.quantum_sim.create_fock_state([1, 0]) + 
-                              self.quantum_sim.create_fock_state([0, 1])).unit()
+                              1j * self.quantum_sim.create_fock_state([0, 1])).unit()
         
         quantum_fidelity = self.quantum_sim.calculate_fidelity(output_state, ideal_superposition)
         
@@ -216,17 +204,72 @@ class CircuitSimulator:
         fidelity /= (np.trace(np.conj(actual).T @ actual) * np.trace(np.conj(ideal).T @ ideal))
         return float(np.real(fidelity))
     
-    def _assess_robustness(self, params: DesignParameters) -> float:
-        """評估製程容忍度"""
-        # 簡化實現，避免遞迴調用
-        # 基於參數範圍給出估計值
-        coupling_ratio = params.coupling_length / 25.0  # 假設最大25μm
-        gap_ratio = params.gap / 1.0  # 假設最大1μm
-        width_ratio = params.waveguide_width / 0.8  # 假設最大0.8μm
+    def _assess_robustness(self, nominal_params: DesignParameters, 
+                           perturbation_percentage: float = 0.02, # 2%的參數擾動
+                           num_samples: int = 10) -> float:
+        """
+        評估製程容忍度：通過對設計參數進行小幅擾動，模擬多次並評估性能變化。
+        穩健性分數越高，表示設計對參數變化越不敏感。
+        """
+        perturbed_fidelities = []
+        perturbed_losses = []
         
-        # 基於經驗公式估算容忍度
-        robustness = 0.9 - 0.1 * abs(coupling_ratio - 0.6) - 0.05 * abs(gap_ratio - 0.3)
-        return float(np.clip(robustness, 0.1, 1.0))
+        # 儲存原始參數，以便恢復
+        original_coupling_length = nominal_params.coupling_length
+        original_gap = nominal_params.gap
+        original_waveguide_width = nominal_params.waveguide_width
+
+        for _ in range(num_samples):
+            # 產生擾動參數
+            perturbed_params = DesignParameters(
+                coupling_length=nominal_params.coupling_length * (1 + random.uniform(-perturbation_percentage, perturbation_percentage)),
+                gap=nominal_params.gap * (1 + random.uniform(-perturbation_percentage, perturbation_percentage)),
+                waveguide_width=nominal_params.waveguide_width * (1 + random.uniform(-perturbation_percentage, perturbation_percentage)),
+                wavelength=nominal_params.wavelength # 波長通常不擾動
+            )
+            
+            # 模擬擾動後的性能
+            # 這裡需要一個方法來執行單次模擬並返回關鍵指標
+            # 為了避免遞迴，我們直接複製simulate_classical的核心邏輯
+            
+            # 計算總傳輸矩陣
+            total_matrix = np.eye(2, dtype=complex)
+            for component in self.components:
+                T = component.compute_transmission_matrix(perturbed_params)
+                if T.shape[0] == total_matrix.shape[1]:
+                    total_matrix = T @ total_matrix
+            
+            # 計算損耗
+            power_outputs = []
+            for i in range(total_matrix.shape[0]):
+                power_outputs.append(np.abs(total_matrix[i, 0])**2)
+            total_power = sum(power_outputs)
+            loss_db = -10 * np.log10(total_power) if total_power > 0 else float('inf')
+            
+            # 計算保真度
+            ideal_matrix = self._get_ideal_matrix()
+            fidelity = self._calculate_matrix_fidelity(total_matrix, ideal_matrix)
+            
+            perturbed_fidelities.append(fidelity)
+            perturbed_losses.append(loss_db)
+        
+        # 恢復原始參數
+        nominal_params.coupling_length = original_coupling_length
+        nominal_params.gap = original_gap
+        nominal_params.waveguide_width = original_waveguide_width
+
+        # 評估穩健性：基於性能指標的標準差或範圍
+        # 這裡我們使用保真度的平均值和標準差來計算穩健性分數
+        avg_fidelity = np.mean(perturbed_fidelities)
+        std_fidelity = np.std(perturbed_fidelities)
+        
+        # 穩健性分數：高平均保真度，低保真度標準差
+        # 這裡的公式可以根據實際需求調整，目標是高分代表高穩健性
+        # 例如：avg_fidelity - 2 * std_fidelity (減去兩倍標準差，代表95%的結果會在這個範圍內)
+        # 並將結果限制在0到1之間
+        robustness_score = np.clip(avg_fidelity - 2 * std_fidelity, 0.0, 1.0)
+        
+        return float(robustness_score)
 
 # 輔助函數
 def create_simple_circuit(component_types: List[str]) -> CircuitSimulator:

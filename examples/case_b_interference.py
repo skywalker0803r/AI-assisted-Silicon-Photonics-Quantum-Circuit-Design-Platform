@@ -134,7 +134,7 @@ class BosonSamplingOptimizer:
             
             # 計算輸出均勻性（理想情況下各輸出概率相近）
             prob_values = list(output_probs.values())
-            uniformity = 1.0 - np.std(prob_values) if prob_values else 0.0
+            uniformity = float(1.0 - np.std(prob_values)) if prob_values else 0.0
             
             # 計算製程容忍度
             robustness = result.robustness_score
@@ -183,10 +183,10 @@ class BosonSamplingOptimizer:
             bs_fidelity = self.calculate_boson_sampling_fidelity(T)
             output_probs = self.calculate_output_probabilities(T)
             prob_values = list(output_probs.values())
-            uniformity = 1.0 - np.std(prob_values) if prob_values else 0.0
+            uniformity = float(1.0 - np.std(prob_values)) if prob_values else 0.0
             robustness = result.robustness_score
             
-            objectives = [bs_fidelity, uniformity, robustness]
+            objectives = [float(bs_fidelity), float(uniformity), float(robustness)]
             
             # 添加到多目標評估器
             self.multi_obj_evaluator.add_solution(params, objectives)

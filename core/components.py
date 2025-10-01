@@ -126,28 +126,39 @@ class MachZehnderInterferometer(SiliconPhotonicComponent):
         return T_total
 
 class ThreePortInterferometer(SiliconPhotonicComponent):
-    """三端口干涉電路 (用於Boson Sampling)"""
+    """三端口干涉電路 (用於Boson Sampling)，保證酉性"""
     
     def __init__(self):
         super().__init__("Three Port Interferometer")
-        
+    
     def compute_transmission_matrix(self, params: DesignParameters) -> np.ndarray:
-        """計算3x3傳輸矩陣"""
-        # 簡化的3x3干涉矩陣，基於多個方向耦合器組合
-        theta1 = params.coupling_length * np.pi / 100  # 歸一化參數
-        theta2 = params.gap * np.pi / 2
-        theta3 = params.waveguide_width * np.pi
-        
-        # 構建3x3酉矩陣
-        T = np.array([
-            [np.cos(theta1), np.sin(theta1) * np.exp(1j*theta2), 0],
-            [-np.sin(theta1), np.cos(theta1) * np.exp(1j*theta2), np.sin(theta3)],
-            [0, -np.sin(theta3), np.cos(theta3)]
-        ])
-        
-        # 確保酉性（歸一化）
-        T = T / np.sqrt(np.sum(np.abs(T)**2, axis=1, keepdims=True))
-        
+        """計算3x3酉傳輸矩陣，使用Givens旋轉矩陣"""
+        theta1 = params.coupling_length * np.pi / 100  # 第一個方向耦合器
+        theta2 = params.gap * np.pi / 2                # 第二個方向耦合器
+        theta3 = params.waveguide_width * np.pi        # 第三個方向耦合器
+
+        # 先構建三個2x2 Givens旋轉矩陣，嵌入到3x3矩陣中
+        R12 = np.array([
+            [np.cos(theta1), np.sin(theta1), 0],
+            [-np.sin(theta1), np.cos(theta1), 0],
+            [0, 0, 1]
+        ], dtype=complex)
+
+        R23 = np.array([
+            [1, 0, 0],
+            [0, np.cos(theta2), np.sin(theta2)],
+            [0, -np.sin(theta2), np.cos(theta2)]
+        ], dtype=complex)
+
+        R12_phase = np.array([
+            [np.exp(1j*theta3), 0, 0],
+            [0, 1, 0],
+            [0, 0, 1]
+        ], dtype=complex)
+
+        # 三個矩陣相乘得到最終酉矩陣
+        T = R12 @ R23 @ R12_phase
+
         self.transmission_matrix = T
         return T
 

@@ -119,6 +119,135 @@ def run_case_c():
         print(f"❌ 案例C執行失敗: {e}")
         return False
 
+def run_case_d():
+    """執行案例D：使用量子模擬進行分束器設計"""
+    print("\n" + "="*60)
+    print("執行案例D：使用量子模擬進行分束器設計")
+    print("="*60)
+    print("⚠️  警告：此模式使用量子模擬進行最佳化，速度會非常慢。")
+    
+    try:
+        from examples.case_a_splitter import SplitterDesignOptimizer
+        from core.components import DesignParameters
+        from typing import Dict
+        import matplotlib.pyplot as plt
+
+        class CaseDOptimizer(SplitterDesignOptimizer):
+            """使用量子模擬的50/50分束器設計最佳化器"""
+            
+            def objective_function(self, params: Dict[str, float]) -> float:
+                """
+                目標函數：基於 simulate_quantum 的結果
+                """
+                design_params = DesignParameters(
+                    coupling_length=params['coupling_length'],
+                    gap=params['gap'],
+                    waveguide_width=params['waveguide_width'],
+                    wavelength=1550e-9
+                )
+                
+                try:
+                    quantum_result = self.simulator.simulate_quantum(design_params)
+                    photon_numbers = quantum_result['photon_numbers']
+                    quantum_fidelity = quantum_result['quantum_fidelity']
+                    splitting_error = abs(photon_numbers[0] - 0.5)
+                    composite_score = quantum_fidelity - splitting_error
+                    
+                    if not hasattr(self, 'optimization_history'):
+                        self.optimization_history = []
+                    
+                    self.optimization_history.append({
+                        'params': params.copy(),
+                        'quantum_fidelity': quantum_fidelity,
+                        'splitting_error': splitting_error,
+                        'objective': composite_score,
+                        'photon_numbers': photon_numbers
+                    })
+                    
+                    return composite_score
+                    
+                except Exception as e:
+                    return -1.0
+
+        optimizer = CaseDOptimizer()
+        n_iterations = 100 
+        print(f"開始最佳化，迭代次數: {n_iterations}")
+        result = optimizer.run_optimization(n_iterations=n_iterations)
+
+        print(f"\n=== 案例D 最佳化結果分析 ====")
+        print(f"最佳化時間: {result['optimization_time']:.2f} 秒")
+        print(f"\n最佳設計參數:")
+        for param, value in result['params'].items():
+            print(f"  {param}: {value:.4f}")
+
+        if optimizer.optimization_history:
+            best_entry = max(optimizer.optimization_history, key=lambda x: x['objective'])
+            print(f"\n性能指標 (基於量子模擬):")
+            print(f"  綜合評分: {best_entry['objective']:.4f}")
+            print(f"  輸出光子分佈: {best_entry['photon_numbers'][0]:.4f} / {best_entry['photon_numbers'][1]:.4f}")
+            print(f"  量子保真度: {best_entry['quantum_fidelity']:.4f}")
+
+            print("\n📊 正在繪製結果圖表...")
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+            fig.suptitle('案例D：量子最佳化過程全方位分析', fontsize=16)
+
+            # 1. 最佳化收斂過程
+            iterations = range(len(optimizer.optimization_history))
+            scores = [entry['objective'] for entry in optimizer.optimization_history]
+            ax1.plot(iterations, scores, 'b-', marker='o', label='目標評分')
+            ax1.set_xlabel('迭代次數')
+            ax1.set_ylabel('綜合評分 (保真度 - 誤差)')
+            ax1.set_title('1. 最佳化收斂過程')
+            ax1.legend()
+            ax1.grid(True, alpha=0.5)
+
+            # 2. 性能指標演化
+            fidelities = [entry['quantum_fidelity'] for entry in optimizer.optimization_history]
+            errors = [entry['splitting_error'] for entry in optimizer.optimization_history]
+            ax2.plot(iterations, fidelities, 'g-', marker='.', label='量子保真度')
+            ax2.plot(iterations, errors, 'r-', marker='.', label='分束誤差')
+            ax2.set_xlabel('迭代次數')
+            ax2.set_ylabel('指標值')
+            ax2.set_title('2. 性能指標演化')
+            ax2.legend()
+            ax2.grid(True, alpha=0.5)
+
+            # 3. 參數空間探索
+            coupling_lengths = [entry['params']['coupling_length'] for entry in optimizer.optimization_history]
+            gaps = [entry['params']['gap'] for entry in optimizer.optimization_history]
+            scatter = ax3.scatter(coupling_lengths, gaps, c=scores, cmap='viridis', alpha=0.8)
+            ax3.set_xlabel('耦合長度 (μm)')
+            ax3.set_ylabel('間距 (μm)')
+            ax3.set_title('3. 參數空間探索')
+            fig.colorbar(scatter, ax=ax3, label='綜合評分')
+            ax3.grid(True, alpha=0.3)
+
+            # 4. 最佳結果的光子分佈
+            best_photon_numbers = best_entry['photon_numbers']
+            ports = ['端口 1', '端口 2']
+            ax4.bar(ports, best_photon_numbers, color=['skyblue', 'salmon'])
+            ax4.set_ylabel('光子數期望值')
+            ax4.set_title(f'4. 最佳設計光子分佈 (評分: {best_entry["objective"]:.3f})')
+            ax4.set_ylim(0, 1.0)
+            for i, v in enumerate(best_photon_numbers):
+                ax4.text(i, v + 0.02, f"{v:.3f}", ha='center', va='bottom')
+            ax4.grid(True, axis='y', alpha=0.5)
+            
+            plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+            plt.show()
+
+        else:
+            print("\n無法分析或繪製量子結果，因為最佳化歷史為空。")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ 案例D執行失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def run_benchmark():
     """執行性能基準測試"""
     print("\n" + "="*60)
@@ -221,6 +350,7 @@ def main():
   python main.py --case-a        # 執行案例A
   python main.py --case-b        # 執行案例B
   python main.py --case-c        # 執行案例C：量子模擬演示
+  python main.py --case-d        # 執行案例D：使用量子模擬進行最佳化 (速度慢)
   python main.py --benchmark     # 執行性能測試
   python main.py --all           # 執行所有案例
         """
@@ -234,6 +364,8 @@ def main():
                        help='執行案例B：三輸入干涉電路設計')
     parser.add_argument('--case-c', action='store_true', 
                        help='執行案例C：量子模擬演示')
+    parser.add_argument('--case-d', action='store_true', 
+                       help='執行案例D：使用量子模擬進行最佳化 (速度慢)')
     parser.add_argument('--benchmark', action='store_true', 
                        help='執行性能基準測試')
     parser.add_argument('--all', action='store_true', 
@@ -280,6 +412,11 @@ def main():
         total_count += 1
         if run_case_c():
             success_count += 1
+
+    if args.case_d or args.all:
+        total_count += 1
+        if run_case_d():
+            success_count += 1
     
     if args.benchmark or args.all:
         total_count += 1
@@ -287,7 +424,7 @@ def main():
             success_count += 1
     
     # 如果沒有指定任何參數，執行快速演示
-    if not any([args.demo, args.case_a, args.case_b, args.case_c, args.benchmark, args.all, args.info]):
+    if not any([args.demo, args.case_a, args.case_b, args.case_c, args.case_d, args.benchmark, args.all, args.info]):
         total_count += 1
         if run_quick_demo():
             success_count += 1

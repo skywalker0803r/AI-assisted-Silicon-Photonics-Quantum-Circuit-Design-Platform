@@ -64,7 +64,9 @@ class CircuitSimulator:
         self.quantum_sim = QuantumStateSimulator(n_modes, n_photons)
     
     def simulate_classical(self, params: DesignParameters, 
-                         wavelengths: Optional[np.ndarray] = None) -> SimulationResult:
+                         wavelengths: Optional[np.ndarray] = None, 
+                         run_wavelength_sweep: bool = True, 
+                         run_robustness_check: bool = True) -> SimulationResult:
         """經典光學模擬"""
         if wavelengths is None:
             wavelengths = np.linspace(1500e-9, 1600e-9, 100)
@@ -90,8 +92,11 @@ class CircuitSimulator:
         total_power = sum(power_outputs)
         loss_db = -10 * np.log10(total_power) if total_power > 0 else float('inf')
         
-        # 波長響應模擬
-        wavelength_response = self._simulate_wavelength_response(params, wavelengths)
+        # 波長響應模擬 (可選)
+        if run_wavelength_sweep:
+            wavelength_response = self._simulate_wavelength_response(params, wavelengths)
+        else:
+            wavelength_response = np.array([]) # 如果不執行，返回空陣列
         
         # 相位響應
         phase_response = np.angle(total_matrix[0, 0])
@@ -100,9 +105,11 @@ class CircuitSimulator:
         ideal_matrix = self._get_ideal_matrix(total_matrix.shape[0]) # 傳入模式數
         fidelity = self._calculate_matrix_fidelity(total_matrix, ideal_matrix)
         
-        # 評估製程容忍度 (現在將基於多次擾動模擬)
-        # 這裡我們將傳入原始的params，並在_assess_robustness內部進行擾動
-        robustness_score = self._assess_robustness(params)
+        # 評估製程容忍度 (可選)
+        if run_robustness_check:
+            robustness_score = self._assess_robustness(params)
+        else:
+            robustness_score = 0.0 # 如果不執行，返回0.0
         
         return SimulationResult(
             transmission_efficiency=transmission_eff,

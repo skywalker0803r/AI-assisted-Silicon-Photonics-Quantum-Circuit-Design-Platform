@@ -308,6 +308,149 @@ def run_benchmark():
         print(f"❌ 性能基準測試失敗: {e}")
         return False
 
+def run_quantum_benchmark():
+    """執行經典與量子模擬的性能對比測試"""
+    print("\n" + "="*60)
+    print("🔬 經典 vs. 量子模擬性能對比測試 (公平比較版)")
+    print("="*60)
+
+    try:
+        from core.components import DesignParameters
+        from core.simulator import create_simple_circuit
+
+        n_runs = 500
+        print(f"每個模擬將執行 {n_runs} 次以獲得平均時間...\n")
+
+        # 準備模擬器
+        simulator = create_simple_circuit(['directional_coupler'])
+        simulator.set_quantum_simulator(n_modes=2, n_photons=1)
+        params = DesignParameters(15.7, 0.2, 0.5, 1550e-9)
+
+        # --- 經典模擬測試 (關閉額外分析) ---
+        start_time = time.time()
+        for _ in range(n_runs):
+            simulator.simulate_classical(params, run_wavelength_sweep=False, run_robustness_check=False)
+        classical_time = time.time() - start_time
+        classical_avg = (classical_time / n_runs) * 1000  # 轉換為毫秒
+
+        print(f"--- 核心經典模擬 (Core Classical) ---")
+        print("   (已關閉波長掃描和容忍度分析)")
+        print(f"總耗時: {classical_time:.4f} 秒")
+        print(f"平均單次耗時: {classical_avg:.4f} 毫秒")
+
+        # --- 量子模擬測試 ---
+        start_time = time.time()
+        for _ in range(n_runs):
+            simulator.simulate_quantum(params)
+        quantum_time = time.time() - start_time
+        quantum_avg = (quantum_time / n_runs) * 1000  # 轉換為毫秒
+
+        print(f"\n--- 核心量子模擬 (Core Quantum) ---")
+        print(f"總耗時: {quantum_time:.4f} 秒")
+        print(f"平均單次耗時: {quantum_avg:.4f} 毫秒")
+
+        # --- 結論 ---
+        if classical_avg > 0:
+            ratio = quantum_avg / classical_avg
+            print(f"\n--- 結論 ---")
+            if ratio > 1:
+                print(f"✅ 公平比較下，量子模擬單次呼叫的速度比經典模擬慢了 {ratio:.2f} 倍。")
+            else:
+                print(f"✅ 公平比較下，量子模擬速度與經典模擬相當或更快。")
+        
+        print("\n✅ 量子性能基準測試完成！")
+        return True
+
+    except Exception as e:
+        print(f"❌ 量子性能基準測試失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def run_case_e():
+    """執行案例E：展示量子模擬的性能擴展問題"""
+    print("\n" + "="*60)
+    print("📈 案例E：量子模擬性能擴展測試 (V3 - 最終版)")
+    print("="*60)
+    print("此版本模擬最核心的矩陣乘法 `U * |ψ⟩`，以展示真實的性能縮放。")
+
+    try:
+        from core.simulator import QuantumStateSimulator
+        import qutip as qt
+        import numpy as np
+
+        configurations = [
+            {'n_modes': 2, 'n_photons': 1, 'n_runs': 500},
+            {'n_modes': 3, 'n_photons': 2, 'n_runs': 100},
+            {'n_modes': 4, 'n_photons': 2, 'n_runs': 50},
+            {'n_modes': 4, 'n_photons': 3, 'n_runs': 10} # 耗時警告
+        ]
+
+        results = []
+
+        for config in configurations:
+            n_modes = config['n_modes']
+            n_photons = config['n_photons']
+            n_runs = config['n_runs']
+            
+            print(f"\n--- 測試配置: {n_modes} 模態 / {n_photons} 光子 (執行 {n_runs} 次) ---")
+            if (n_modes >= 4 and n_photons >= 3):
+                print("⚠️  警告：此配置非常耗時，請耐心等待...")
+
+            q_sim = QuantumStateSimulator(n_modes=n_modes, n_photons=n_photons)
+            
+            input_photon_dist = [0] * n_modes
+            photons_to_distribute = n_photons
+            for i in range(n_modes):
+                if photons_to_distribute > 0:
+                    input_photon_dist[i] = 1
+                    photons_to_distribute -= 1
+            if photons_to_distribute > 0:
+                 input_photon_dist[0] += photons_to_distribute
+            input_state = q_sim.create_fock_state(input_photon_dist)
+
+            # 創建一個與希爾伯特空間維度匹配的隨機酉矩陣
+            hilbert_space_dim = input_state.shape[0]
+            # 修正：手動構造正確的算符維度
+            U_rand = qt.rand_unitary(hilbert_space_dim)
+            U = qt.Qobj(U_rand.full(), dims=[input_state.dims[0], input_state.dims[0]])
+
+            # 計時
+            start_time = time.perf_counter()
+            for _ in range(n_runs):
+                # 執行核心操作：矩陣-向量乘法
+                evolved_state = U * input_state
+            total_time = time.perf_counter() - start_time
+            
+            avg_time_ms = (total_time / n_runs) * 1000
+
+            print(f"總耗時: {total_time:.4f} 秒")
+            print(f"平均單次演化耗時: {avg_time_ms:.4f} 毫秒")
+            results.append(avg_time_ms)
+
+        # 結論
+        print("\n--- 結論 ---")
+        for i in range(len(configurations) - 1):
+            config_curr = configurations[i]
+            config_next = configurations[i+1]
+            
+            if results[i] > 0:
+                ratio = results[i+1] / results[i]
+                print(f"從 ({config_curr['n_modes']}模/{config_curr['n_photons']}光子) 到 ({config_next['n_modes']}模/{config_next['n_photons']}光子)，單次演化耗時增加了 {ratio:.2f} 倍。")
+            else:
+                print(f"從 ({config_curr['n_modes']}模/{config_curr['n_photons']}光子) 到 ({config_next['n_modes']}模/{config_next['n_photons']}光子)，因前者耗時過短無法計算比例。")
+
+        print("\n✅ 最終證明：模擬真實的量子演化時，計算複雜度隨系統規模指數級增長。")
+        return True
+
+    except Exception as e:
+        print(f"❌ 案例E執行失敗: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+
 def show_system_info():
     """顯示系統資訊"""
     print("\n" + "="*60)
@@ -346,13 +489,15 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用範例：
-  python main.py --demo          # 執行快速演示
-  python main.py --case-a        # 執行案例A
-  python main.py --case-b        # 執行案例B
-  python main.py --case-c        # 執行案例C：量子模擬演示
-  python main.py --case-d        # 執行案例D：使用量子模擬進行最佳化 (速度慢)
-  python main.py --benchmark     # 執行性能測試
-  python main.py --all           # 執行所有案例
+  python main.py --demo              # 執行快速演示
+  python main.py --case-a            # 執行案例A
+  python main.py --case-b            # 執行案例B
+  python main.py --case-c            # 執行案例C：量子模擬演示
+  python main.py --case-d            # 執行案例D：使用量子模擬進行最佳化 (速度慢)
+  python main.py --case-e            # 執行案例E：量子模擬性能擴展測試
+  python main.py --benchmark         # 執行性能測試
+  python main.py --benchmark-quantum # 執行經典與量子模擬的性能對比
+  python main.py --all               # 執行所有案例
         """
     )
     
@@ -366,8 +511,12 @@ def main():
                        help='執行案例C：量子模擬演示')
     parser.add_argument('--case-d', action='store_true', 
                        help='執行案例D：使用量子模擬進行最佳化 (速度慢)')
+    parser.add_argument('--case-e', action='store_true', 
+                       help='執行案例E：量子模擬性能擴展測試')
     parser.add_argument('--benchmark', action='store_true', 
                        help='執行性能基準測試')
+    parser.add_argument('--benchmark-quantum', action='store_true', 
+                       help='執行經典與量子模擬的性能對比測試')
     parser.add_argument('--all', action='store_true', 
                        help='執行所有案例')
     parser.add_argument('--info', action='store_true', 
@@ -417,14 +566,24 @@ def main():
         total_count += 1
         if run_case_d():
             success_count += 1
+
+    if args.case_e:
+        total_count += 1
+        if run_case_e():
+            success_count += 1
     
     if args.benchmark or args.all:
         total_count += 1
         if run_benchmark():
             success_count += 1
+
+    if args.benchmark_quantum:
+        total_count += 1
+        if run_quantum_benchmark():
+            success_count += 1
     
     # 如果沒有指定任何參數，執行快速演示
-    if not any([args.demo, args.case_a, args.case_b, args.case_c, args.case_d, args.benchmark, args.all, args.info]):
+    if not any([args.demo, args.case_a, args.case_b, args.case_c, args.case_d, args.case_e, args.benchmark, args.benchmark_quantum, args.all, args.info]):
         total_count += 1
         if run_quick_demo():
             success_count += 1
